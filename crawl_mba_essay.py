@@ -93,24 +93,33 @@ def crawl_mba_essay(fid: str, filename: str, request):
         page_id = int(next_id)
 
 
-def run(playwright: Playwright, filename) -> None:
-    browser = playwright.chromium.launch(headless=True)
+def run(playwright: Playwright, filename, username, password) -> None:
+    browser = playwright.chromium.launch(headless=False)
     context = browser.new_context()
     page = context.new_page()
     page.goto("https://thesis.fudan.edu.cn/")
-    page.locator("#keyword").click()
-    page.locator("#keyword").click()
-    page.locator("#keyword").fill(filename)
-    page.locator("#searchform a").first.click()
+    page.get_by_placeholder("请输入检索关键词").click()
+    page.get_by_placeholder("请输入检索关键词").fill(filename)
+    page.get_by_role("button", name=" 开始检索").click()
+    page.get_by_role("row", name=filename).locator("a").click()
+    page.get_by_role("button", name="我知道了").click()
+    page.get_by_placeholder("用户名（本人学工号）").click()
+    page.get_by_placeholder("用户名（本人学工号）").fill(username)
+    page.locator("#password").click()
+    page.locator("#password").fill(password)
+    page.get_by_role("button", name="登录").click()
     with page.expect_popup() as page1_info:
-        page.locator("iframe[name=\"frame_content\"]").content_frame.get_by_role("row", name="1").locator("a").click()
+        page.get_by_role("row", name=filename).locator("a").click()
     page1 = page1_info.value
     with page1.expect_popup() as page2_info:
-        page1.get_by_role("link", name="查看全文").click()
+        page1.get_by_role("button", name=" 查看全文").click()
     page2 = page2_info.value
+    page2.wait_for_load_state("networkidle")
 
     parsed_url = urlparse(page2.url)
     query_params = parse_qs(parsed_url.query)
+    print(query_params)
+    print(page2.url)
     fid = query_params["fid"][0]
 
     crawl_mba_essay(fid, filename, page2.context.request)
@@ -126,11 +135,13 @@ def run(playwright: Playwright, filename) -> None:
 if __name__ == "__main__":
     arg_count = len(sys.argv) - 1
     if arg_count == 0:
-        print("Usage: crawl_mba_essay.py <filename>")
+        print("Usage: crawl_mba_essay.py <filename> <学号> <密码>")
         sys.exit(1)
     
     filename = sys.argv[1]
+    username = sys.argv[2]
+    password = sys.argv[3]
 
     with sync_playwright() as playwright:
-        run(playwright, filename=filename)
+        run(playwright, filename=filename, username=username, password=password)
 

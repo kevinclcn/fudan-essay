@@ -9,6 +9,6 @@ pip install -r requirements.txt
 3. 搜索论文，获取想要下载的论文题目
 3. 运行程序
 ```bash
-python craw_mba_eassy.py "{上一步中搜索到的论文题目}"
+python craw_mba_eassy.py "{上一步中搜索到的论文题目}" crawl_mba_essay.py <filename> <学号> <密码>
 ```
 
