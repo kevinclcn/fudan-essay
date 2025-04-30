@@ -4,6 +4,7 @@ from fpdf import FPDF
 from PIL import Image
 from playwright.sync_api import Playwright, sync_playwright, expect, APIRequestContext
 from urllib.parse import urlparse, parse_qs
+import re
 
 def get_and_save_to_img(url: str, filename: str, request: APIRequestContext):
     response = request.get(url)
@@ -101,7 +102,7 @@ def run(playwright: Playwright, filename, username, password) -> None:
     page.get_by_placeholder("请输入检索关键词").click()
     page.get_by_placeholder("请输入检索关键词").fill(filename)
     page.get_by_role("button", name=" 开始检索").click()
-    page.get_by_role("row", name=filename).locator("a").click()
+    page.get_by_role("row", name=re.compile(filename)).locator("a").click()
     page.get_by_role("button", name="我知道了").click()
     page.get_by_placeholder("用户名（本人学工号）").click()
     page.get_by_placeholder("用户名（本人学工号）").fill(username)
@@ -109,7 +110,7 @@ def run(playwright: Playwright, filename, username, password) -> None:
     page.locator("#password").fill(password)
     page.get_by_role("button", name="登录").click()
     with page.expect_popup() as page1_info:
-        page.get_by_role("row", name=filename).locator("a").click()
+        page.get_by_role("row", name=re.compile(filename)).locator("a").click()
     page1 = page1_info.value
     with page1.expect_popup() as page2_info:
         page1.get_by_role("button", name=" 查看全文").click()
