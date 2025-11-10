@@ -2,29 +2,44 @@ import os, sys
 import logging
 from fpdf import FPDF
 from PIL import Image
-from playwright.sync_api import Playwright, sync_playwright, expect, APIRequestContext
 from urllib.parse import urlparse, parse_qs
 import re
-
-def get_and_save_to_img(url: str, filename: str, request: APIRequestContext):
-    response = request.get(url)
-    if response.ok:
-        image_content = response.body()
-        with open(filename, 'wb') as file:
-            file.write(image_content)
-    else:
-        logging.error(f"get image failed: {response.status_code}")
+import requests
 
 
-def get_pages(url: str, request: APIRequestContext):
+def get_and_save_to_img(url: str, filename: str, cookies: dict = None):
+    """
+    使用 requests 下载图片
+    cookies: 字典格式，例如 {"JSESSIONID": "xxx"}
+    """
     try:
-        response = request.get(url)
-        if response.ok:
+        # 使用 requests.get，cookies 参数可以直接接受字典
+        response = requests.get(url, cookies=cookies, timeout=30)
+        if response.status_code == 200:
+            with open(filename, 'wb') as file:
+                file.write(response.content)
+        else:
+            logging.error(f"get image failed: {response.status_code}")
+    except Exception as e:
+        logging.exception(f"get image exception: {e}")
+
+
+def get_pages(url: str, cookies: dict = None):
+    """
+    使用 requests 获取页面数据
+    cookies: 字典格式，例如 {"JSESSIONID": "xxx"}
+    """
+    try:
+        # 使用 requests.get，cookies 参数可以直接接受字典
+        response = requests.get(url, cookies=cookies, timeout=30)
+        if response.status_code == 200:
             return response.json()
         else:
             logging.error(f"get page failed: {response.status_code}")
+            return None
     except Exception as e:
-        logging.exception("get page exception: ",e)
+        logging.exception("get page exception: ", e)
+        return None
 
 def images_in_dir_to_pdf(image_dir, output_pdf_path):
     # 创建一个 PDF 对象
@@ -65,8 +80,13 @@ def images_in_dir_to_pdf(image_dir, output_pdf_path):
     # 保存 PDF 文件
     pdf.output(output_pdf_path)
 
-def crawl_mba_essay(fid: str, filename: str, request):
-
+def crawl_mba_essay(fid: str, filename: str, cookies: dict = None):
+    """
+    爬取 MBA 论文
+    fid: 文件ID
+    filename: 保存的文件名（也是目录名）
+    cookies: 字典格式的 cookies，例如 {"JSESSIONID": "xxx"}
+    """
     if not os.path.exists(filename):
         os.makedirs(filename, exist_ok=True)
 
@@ -75,9 +95,13 @@ def crawl_mba_essay(fid: str, filename: str, request):
     page_id = 0
     processed_pages = set()
     while True: 
+        url = url_template.format(page_id=page_id, fid=fid)
+        pages = get_pages(url, cookies=cookies)
         
-        url = url_template.format(page_id=page_id,fid=fid,filename=filename)
-        pages = get_pages(url, request=request)
+        if not pages or "list" not in pages:
+            logging.error("No pages data received")
+            break
+            
         next_id = page_id
         for page in pages["list"]:
             id = int(page["id"])
@@ -87,62 +111,34 @@ def crawl_mba_essay(fid: str, filename: str, request):
                 continue
             print(f"downloading page {id}")
             processed_pages.add(id)
-            get_and_save_to_img(page["src"], f"{filename}/page_{int(page['id']):0{3}d}.jpeg", request)
+            get_and_save_to_img(page["src"], f"{filename}/page_{int(page['id']):0{3}d}.jpeg", cookies)
 
         if int(next_id) <= page_id:
             break
         page_id = int(next_id)
 
 
-def run(playwright: Playwright, filename, username, password) -> None:
-    browser = playwright.chromium.launch(headless=False)
-    context = browser.new_context()
-    page = context.new_page()
-    page.goto("https://thesis.fudan.edu.cn/")
-    page.get_by_placeholder("请输入检索关键词").click()
-    page.get_by_placeholder("请输入检索关键词").fill(filename)
-    page.get_by_role("button", name=" 开始检索").click()
-    page.get_by_role("row", name=re.compile(filename)).locator("a").click()
-    page.get_by_role("button", name="我知道了").click()
-    page.get_by_placeholder("用户名（本人学工号）").click()
-    page.get_by_placeholder("用户名（本人学工号）").fill(username)
-    page.locator("#password").click()
-    page.locator("#password").fill(password)
-    page.get_by_role("button", name="登录").click()
-    with page.expect_popup() as page1_info:
-        page.get_by_role("row", name=re.compile(filename)).locator("a").click()
-    page1 = page1_info.value
-    with page1.expect_popup() as page2_info:
-        page1.get_by_role("button", name=" 查看全文").click()
-    page2 = page2_info.value
-    page2.wait_for_load_state("networkidle")
-
-    parsed_url = urlparse(page2.url)
-    query_params = parse_qs(parsed_url.query)
-    print(query_params)
-    print(page2.url)
-    fid = query_params["fid"][0]
-
-    crawl_mba_essay(fid, filename, page2.context.request)
-    images_in_dir_to_pdf(filename, f"{filename}.pdf")
-
-    # ---------------------
-    context.close()
-    browser.close()
-
-
 
 
 if __name__ == "__main__":
     arg_count = len(sys.argv) - 1
-    if arg_count == 0:
-        print("Usage: crawl_mba_essay.py <filename> <学号> <密码>")
+    if arg_count < 2:
+        print("Usage: crawl_mba_essay.py <JSessionID> <fid> [filename]")
+        print("Example: crawl_mba_essay.py ABC123XYZ 12345")
         sys.exit(1)
     
-    filename = sys.argv[1]
-    username = sys.argv[2]
-    password = sys.argv[3]
+    JSessionID = sys.argv[1]
+    fid = sys.argv[2]
+    # 如果提供了第三个参数作为文件名，使用它；否则使用 fid 作为文件名
+    filename = sys.argv[3] if arg_count >= 3 else fid
+    
+    cookies = {
+        "JSESSIONID": JSessionID
+    }
 
-    with sync_playwright() as playwright:
-        run(playwright, filename=filename, username=username, password=password)
+    # 使用 requests 爬取
+    crawl_mba_essay(fid, filename, cookies)
+    
+    # 生成 PDF
+    images_in_dir_to_pdf(filename, f"{filename}.pdf")
 
