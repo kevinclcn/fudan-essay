@@ -2,9 +2,28 @@ import os, sys
 import logging
 from fpdf import FPDF
 from PIL import Image
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 import re
 import requests
+
+
+def remove_watermark_from_url(url: str) -> str:
+    """
+    从URL中移除watermark参数
+    """
+    try:
+        parsed = urlparse(url)
+        query_params = parse_qs(parsed.query)
+        # 移除watermark参数
+        if 'watermark' in query_params:
+            del query_params['watermark']
+        # 重新构建URL
+        new_query = urlencode(query_params, doseq=True)
+        new_parsed = parsed._replace(query=new_query)
+        return urlunparse(new_parsed)
+    except Exception as e:
+        logging.exception(f"Error removing watermark from URL: {e}")
+        return url
 
 
 def get_and_save_to_img(url: str, filename: str, cookies: dict = None):
@@ -38,7 +57,7 @@ def get_pages(url: str, cookies: dict = None):
             logging.error(f"get page failed: {response.status_code}")
             return None
     except Exception as e:
-        logging.exception("get page exception: ", e)
+        logging.exception(f"get page exception for {url}: {e}")
         return None
 
 def images_in_dir_to_pdf(image_dir, output_pdf_path):
@@ -98,10 +117,17 @@ def crawl_mba_essay(fid: str, filename: str, cookies: dict = None):
         url = url_template.format(page_id=page_id, fid=fid)
         pages = get_pages(url, cookies=cookies)
         
+        # 检查返回数据是否有效
         if not pages or "list" not in pages:
-            logging.error("No pages data received")
+            logging.info(f"No pages data received for page_id={page_id}, stopping")
+            break
+        
+        # 检查列表是否为空
+        if not pages["list"] or len(pages["list"]) == 0:
+            logging.info(f"Empty list returned for page_id={page_id}, stopping")
             break
             
+        # 遍历列表，下载图片并找到最大的id
         next_id = page_id
         for page in pages["list"]:
             id = int(page["id"])
@@ -111,9 +137,13 @@ def crawl_mba_essay(fid: str, filename: str, cookies: dict = None):
                 continue
             print(f"downloading page {id}")
             processed_pages.add(id)
-            get_and_save_to_img(page["src"], f"{filename}/page_{int(page['id']):0{3}d}.jpeg", cookies)
+            # 移除URL中的watermark参数
+            image_url = remove_watermark_from_url(page["src"])
+            get_and_save_to_img(image_url, f"{filename}/page_{int(page['id']):0{3}d}.jpeg", cookies)
 
+        # 如果返回的列表中最大的id不大于当前查询的page_id，说明没有更多页面了
         if int(next_id) <= page_id:
+            logging.info(f"Max id {next_id} <= current page_id {page_id}, stopping")
             break
         page_id = int(next_id)
 
@@ -130,7 +160,8 @@ if __name__ == "__main__":
     JSessionID = sys.argv[1]
     fid = sys.argv[2]
     # 如果提供了第三个参数作为文件名，使用它；否则使用 fid 作为文件名
-    filename = sys.argv[3] if arg_count >= 3 else fid
+    # 如果第三个参数是空字符串，也使用 fid
+    filename = sys.argv[3] if arg_count >= 3 and sys.argv[3].strip() else fid
     
     cookies = {
         "JSESSIONID": JSessionID
