@@ -1,9 +1,9 @@
 import os, sys
 import logging
+import tempfile
 from fpdf import FPDF
 from PIL import Image
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-import re
 import requests
 
 
@@ -99,15 +99,13 @@ def images_in_dir_to_pdf(image_dir, output_pdf_path):
     # 保存 PDF 文件
     pdf.output(output_pdf_path)
 
-def crawl_mba_essay(fid: str, filename: str, cookies: dict = None):
+def crawl_mba_essay(fid: str, imgdir: str, cookies: dict = None):
     """
     爬取 MBA 论文
     fid: 文件ID
-    filename: 保存的文件名（也是目录名）
+    imgdir: 保存的文件名（也是目录名）
     cookies: 字典格式的 cookies，例如 {"JSESSIONID": "xxx"}
     """
-    if not os.path.exists(filename):
-        os.makedirs(filename, exist_ok=True)
 
     url_template = "https://drm.fudan.edu.cn/read/jumpServlet?page={page_id}&fid={fid}"
 
@@ -139,7 +137,7 @@ def crawl_mba_essay(fid: str, filename: str, cookies: dict = None):
             processed_pages.add(id)
             # 移除URL中的watermark参数
             image_url = remove_watermark_from_url(page["src"])
-            get_and_save_to_img(image_url, f"{filename}/page_{int(page['id']):0{3}d}.jpeg", cookies)
+            get_and_save_to_img(image_url, f"{imgdir}/page_{int(page['id']):0{3}d}.jpeg", cookies)
 
         # 如果返回的列表中最大的id不大于当前查询的page_id，说明没有更多页面了
         if int(next_id) <= page_id:
@@ -167,9 +165,15 @@ if __name__ == "__main__":
         "JSESSIONID": JSessionID
     }
 
-    # 使用 requests 爬取
-    crawl_mba_essay(fid, filename, cookies)
+    # 使用临时目录，自动清理
+    with tempfile.TemporaryDirectory(prefix=f"{filename}_img_") as imgdir:
+        # 使用 requests 爬取
+        crawl_mba_essay(fid, imgdir, cookies=cookies)
+        
+        # 生成 PDF
+        images_in_dir_to_pdf(imgdir, output_pdf_path=f"{filename}.pdf")
+        # 退出 with 块时自动删除临时目录
+
+
     
-    # 生成 PDF
-    images_in_dir_to_pdf(filename, f"{filename}.pdf")
 
